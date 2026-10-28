@@ -29,7 +29,8 @@ namespace Zephyr {
 
     }
 
-    void ZephyrUartDriver::configure(const struct device *dev, U32 baud_rate, bool flow) {
+    void ZephyrUartDriver::configure(const struct device *dev, U32 baud_rate, bool flow, U8 *ring_buf_data,
+                                     U32 ring_buf_size) {
         FW_ASSERT(dev != nullptr);
         m_dev = dev;
 
@@ -50,7 +51,12 @@ namespace Zephyr {
         }
         uart_configure(this->m_dev, &uart_cfg);
 
-        ring_buf_init(&this->m_ring_buf, RING_BUF_SIZE, this->m_ring_buf_data);
+        // Use the caller's ring storage when given; otherwise the member array
+        if ((ring_buf_data != nullptr) && (ring_buf_size != 0)) {
+            ring_buf_init(&this->m_ring_buf, ring_buf_size, ring_buf_data);
+        } else {
+            ring_buf_init(&this->m_ring_buf, RING_BUF_SIZE, this->m_ring_buf_data);
+        }
         uart_irq_callback_user_data_set(this->m_dev, serial_cb, &this->m_ring_buf);
 
         uart_irq_rx_enable(this->m_dev);
