@@ -40,7 +40,20 @@ namespace Zephyr {
         //!
         ~ZephyrUartDriver();
 
-        void configure(const struct device *dev, U32 baud_rate, bool flow = false);
+        //! Configure the UART and start interrupt-driven receive
+        //!
+        //! The receive ring is filled by the UART interrupt handler and emptied once per schedIn call, into
+        //! one buffer from the allocate port. By default the ring is the member array of RING_BUF_SIZE bytes.
+        //! A caller can give its own ring buffer for a link that receives more than RING_BUF_SIZE bytes in one
+        //! schedIn period. The ring should not be larger than the allocator's buffer size: bytes in excess of
+        //! one allocated buffer wait for the next schedIn call.
+        //!
+        void configure(const struct device *dev, /*!< The UART device*/
+                       U32 baud_rate, /*!< The baud rate*/
+                       bool flow = false, /*!< true selects RS-485 flow control*/
+                       U8 *ring_buf_data = nullptr, /*!< Caller-owned receive ring storage, or nullptr*/
+                       U32 ring_buf_size = 0 /*!< Size of ring_buf_data in bytes, or 0*/
+        );
 
     public:
 
