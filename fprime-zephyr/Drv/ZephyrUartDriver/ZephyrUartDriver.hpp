@@ -55,6 +55,19 @@ namespace Zephyr {
                        U32 ring_buf_size = 0 /*!< Size of ring_buf_data in bytes, or 0*/
         );
 
+        //! Receive errors the UART has flagged since configure()
+        //!
+        //! Counted in the interrupt handler, once per interrupt in which the UART showed the flag. A burst of
+        //! damaged bytes handled in one interrupt therefore counts once.
+        struct ErrorCounts {
+            U32 framing; //!< A byte arrived without its stop bit
+            U32 noise;   //!< The samples within one bit disagreed
+            U32 overrun; //!< A byte arrived before the previous one was read
+        };
+
+        //! Receive error totals since configure(). May be called from any thread.
+        ErrorCounts getErrorCounts() const;
+
     public:
 
         static void serial_cb(const struct device *dev, void *user_data);
@@ -89,6 +102,11 @@ namespace Zephyr {
 
         U8 m_ring_buf_data[RING_BUF_SIZE];
         struct ring_buf m_ring_buf;
+
+        //! Written by the interrupt handler only
+        atomic_t m_framingErrors;
+        atomic_t m_noiseErrors;
+        atomic_t m_overrunErrors;
     };
 
 } // end namespace Zephyr

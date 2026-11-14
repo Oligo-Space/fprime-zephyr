@@ -19,7 +19,11 @@ namespace Zephyr {
     ZephyrUartDriver ::
         ZephyrUartDriver(
             const char *const compName
-        ) : ZephyrUartDriverComponentBase(compName)
+        ) : ZephyrUartDriverComponentBase(compName),
+            m_dev(nullptr),
+            m_framingErrors(ATOMIC_INIT(0)),
+            m_noiseErrors(ATOMIC_INIT(0)),
+            m_overrunErrors(ATOMIC_INIT(0))
     {
     }
 
@@ -57,7 +61,7 @@ namespace Zephyr {
         } else {
             ring_buf_init(&this->m_ring_buf, RING_BUF_SIZE, this->m_ring_buf_data);
         }
-        uart_irq_callback_user_data_set(this->m_dev, serial_cb, &this->m_ring_buf);
+        uart_irq_callback_user_data_set(this->m_dev, serial_cb, this);
 
         uart_irq_rx_enable(this->m_dev);
 	    uart_irq_tx_disable(this->m_dev);
@@ -69,10 +73,25 @@ namespace Zephyr {
 
     void ZephyrUartDriver::serial_cb(const struct device *dev, void *user_data)
     {
-        struct ring_buf *ring_buf = reinterpret_cast<struct ring_buf *>(user_data);
+        ZephyrUartDriver *self = reinterpret_cast<ZephyrUartDriver *>(user_data);
+        struct ring_buf *ring_buf = &self->m_ring_buf;
 
         if (!uart_irq_update(dev)) {
             return;
+        }
+
+        // Read and clear the receive error flags before the data: reading the data clears the overrun flag.
+        const int errors = uart_err_check(dev);
+        if (errors > 0) {
+            if ((errors & UART_ERROR_FRAMING) != 0) {
+                (void)atomic_inc(&self->m_framingErrors);
+            }
+            if ((errors & UART_ERROR_NOISE) != 0) {
+                (void)atomic_inc(&self->m_noiseErrors);
+            }
+            if ((errors & UART_ERROR_OVERRUN) != 0) {
+                (void)atomic_inc(&self->m_overrunErrors);
+            }
         }
 
         if (!uart_irq_rx_ready(dev)) {
@@ -87,6 +106,14 @@ namespace Zephyr {
                 printk("UART buffer overrun\n");
             }
         }
+    }
+
+    ZephyrUartDriver::ErrorCounts ZephyrUartDriver::getErrorCounts() const {
+        ErrorCounts counts;
+        counts.framing = static_cast<U32>(atomic_get(&this->m_framingErrors));
+        counts.noise = static_cast<U32>(atomic_get(&this->m_noiseErrors));
+        counts.overrun = static_cast<U32>(atomic_get(&this->m_overrunErrors));
+        return counts;
     }
 
     // ----------------------------------------------------------------------
