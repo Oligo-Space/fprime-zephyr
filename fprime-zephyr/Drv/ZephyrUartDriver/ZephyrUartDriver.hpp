@@ -55,19 +55,6 @@ namespace Zephyr {
                        U32 ring_buf_size = 0 /*!< Size of ring_buf_data in bytes, or 0*/
         );
 
-        //! Receive errors the UART has flagged since configure()
-        //!
-        //! Counted in the interrupt handler, once per interrupt in which the UART showed the flag. A burst of
-        //! damaged bytes handled in one interrupt therefore counts once.
-        struct ErrorCounts {
-            U32 framing; //!< A byte arrived without its stop bit
-            U32 noise;   //!< The samples within one bit disagreed
-            U32 overrun; //!< A byte arrived before the previous one was read
-        };
-
-        //! Receive error totals since configure(). May be called from any thread.
-        ErrorCounts getErrorCounts() const;
-
     public:
 
         static void serial_cb(const struct device *dev, void *user_data);
@@ -96,6 +83,23 @@ namespace Zephyr {
         void recvReturnIn_handler(
             const FwIndexType portNum, /*!< The port number*/
             Fw::Buffer &returnBuffer
+        );
+
+        //! Handler implementation for txComplete: the UART's transmission-complete flag
+        bool txComplete_handler(
+            const FwIndexType portNum /*!< The port number*/
+        );
+
+        //! Handler implementation for setBaudRate
+        Fw::Success setBaudRate_handler(
+            const FwIndexType portNum, /*!< The port number*/
+            U32 baudRate /*!< Bits per second*/
+        );
+
+        //! Handler implementation for errorCounts. Counted in the interrupt handler, once per interrupt in
+        //! which the UART showed the flag, so a burst of damaged bytes handled in one interrupt counts once.
+        Zephyr::UartErrorCounts errorCounts_handler(
+            const FwIndexType portNum /*!< The port number*/
         );
 
         const struct device *m_dev;

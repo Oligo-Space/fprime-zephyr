@@ -108,14 +108,6 @@ namespace Zephyr {
         }
     }
 
-    ZephyrUartDriver::ErrorCounts ZephyrUartDriver::getErrorCounts() const {
-        ErrorCounts counts;
-        counts.framing = static_cast<U32>(atomic_get(&this->m_framingErrors));
-        counts.noise = static_cast<U32>(atomic_get(&this->m_noiseErrors));
-        counts.overrun = static_cast<U32>(atomic_get(&this->m_overrunErrors));
-        return counts;
-    }
-
     // ----------------------------------------------------------------------
     // Handler implementations for user-defined typed input ports
     // ----------------------------------------------------------------------
@@ -152,6 +144,29 @@ namespace Zephyr {
 
     void ZephyrUartDriver ::recvReturnIn_handler(const FwIndexType portNum, Fw::Buffer &returnBuffer) {
         this->deallocate_out(0, returnBuffer);
+    }
+
+    bool ZephyrUartDriver ::txComplete_handler(const FwIndexType portNum) {
+        // uart_poll_out() returns once a byte is in the transmit register, before it has left the pin.
+        // The transmission-complete flag is set only when the last stop bit is out; writing a byte clears it.
+        FW_ASSERT(this->m_dev != nullptr);
+        return uart_irq_tx_complete(this->m_dev) > 0;
+    }
+
+    Fw::Success ZephyrUartDriver ::setBaudRate_handler(const FwIndexType portNum, U32 baudRate) {
+        FW_ASSERT(this->m_dev != nullptr);
+        struct uart_config config;
+        if (uart_config_get(this->m_dev, &config) != 0) {
+            return Fw::Success::FAILURE;
+        }
+        config.baudrate = baudRate;
+        return (uart_configure(this->m_dev, &config) == 0) ? Fw::Success::SUCCESS : Fw::Success::FAILURE;
+    }
+
+    Zephyr::UartErrorCounts ZephyrUartDriver ::errorCounts_handler(const FwIndexType portNum) {
+        return Zephyr::UartErrorCounts(static_cast<U32>(atomic_get(&this->m_framingErrors)),
+                                       static_cast<U32>(atomic_get(&this->m_noiseErrors)),
+                                       static_cast<U32>(atomic_get(&this->m_overrunErrors)));
     }
 
 } // end namespace Zephyr
