@@ -23,7 +23,11 @@ namespace Zephyr {
             m_dev(nullptr),
             m_framingErrors(ATOMIC_INIT(0)),
             m_noiseErrors(ATOMIC_INIT(0)),
-            m_overrunErrors(ATOMIC_INIT(0))
+            m_overrunErrors(ATOMIC_INIT(0)),
+            m_traceCycles{},
+            m_traceBytes{},
+            m_traceFlags{},
+            m_traceTotal(0)
     {
     }
 
@@ -99,8 +103,12 @@ namespace Zephyr {
         }
 
         U8 c;
+        // The error flags read above belong to the first byte read in this interrupt.
+        U8 flags = (errors > 0) ? static_cast<U8>(errors) : 0;
         // TODO: Get rid of the endless loop (in an IRQ handler!).
         while (uart_fifo_read(dev, &c, 1) == 1) {
+            self->traceByte(c, flags);
+            flags = 0;
             if (ring_buf_put(ring_buf, &c, 1) != 1) {
                 // TODO: Handle properly.
                 printk("UART buffer overrun\n");
@@ -167,6 +175,31 @@ namespace Zephyr {
         return Zephyr::UartErrorCounts(static_cast<U32>(atomic_get(&this->m_framingErrors)),
                                        static_cast<U32>(atomic_get(&this->m_noiseErrors)),
                                        static_cast<U32>(atomic_get(&this->m_overrunErrors)));
+    }
+
+    void ZephyrUartDriver::traceByte(U8 byte, U8 flags) {
+        const U32 slot = this->m_traceTotal % Zephyr::UART_RX_TRACE_SIZE;
+        this->m_traceCycles[slot] = k_cycle_get_32();
+        this->m_traceBytes[slot] = byte;
+        this->m_traceFlags[slot] = flags;
+        this->m_traceTotal++;
+    }
+
+    void ZephyrUartDriver ::rxTrace_handler(const FwIndexType portNum, Zephyr::UartRxTrace& trace) {
+        const U32 size = Zephyr::UART_RX_TRACE_SIZE;
+        const unsigned int key = irq_lock();
+        const U32 total = this->m_traceTotal;
+        const U32 count = (total < size) ? total : size;
+        const U32 first = total - count;
+        for (U32 i = 0; i < count; i++) {
+            const U32 slot = (first + i) % size;
+            trace.get_cycles()[i] = this->m_traceCycles[slot];
+            trace.get_bytes()[i] = this->m_traceBytes[slot];
+            trace.get_flags()[i] = this->m_traceFlags[slot];
+        }
+        irq_unlock(key);
+        trace.set_count(count);
+        trace.set_total(total);
     }
 
 } // end namespace Zephyr

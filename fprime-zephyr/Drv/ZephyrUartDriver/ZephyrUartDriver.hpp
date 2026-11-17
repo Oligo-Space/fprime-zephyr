@@ -8,6 +8,7 @@
 #define ZephyrUartDriver_HPP
 
 #include "fprime-zephyr/Drv/ZephyrUartDriver/ZephyrUartDriverComponentAc.hpp"
+#include "fprime-zephyr/Drv/UartPorts/FppConstantsAc.hpp"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -102,6 +103,16 @@ namespace Zephyr {
             const FwIndexType portNum /*!< The port number*/
         );
 
+        //! Handler implementation for rxTrace: copies the trace ring, oldest entry first, with interrupts
+        //! locked for the copy
+        void rxTrace_handler(
+            const FwIndexType portNum, /*!< The port number*/
+            Zephyr::UartRxTrace& trace /*!< Filled with the trace*/
+        );
+
+        //! Records one received byte in the trace ring; interrupt handler only
+        void traceByte(U8 byte, U8 flags);
+
         const struct device *m_dev;
 
         U8 m_ring_buf_data[RING_BUF_SIZE];
@@ -111,6 +122,13 @@ namespace Zephyr {
         atomic_t m_framingErrors;
         atomic_t m_noiseErrors;
         atomic_t m_overrunErrors;
+
+        //! Receive trace ring, written by the interrupt handler only. m_traceTotal counts every byte
+        //! recorded; entry i lives at index i % UART_RX_TRACE_SIZE.
+        U32 m_traceCycles[Zephyr::UART_RX_TRACE_SIZE];
+        U8 m_traceBytes[Zephyr::UART_RX_TRACE_SIZE];
+        U8 m_traceFlags[Zephyr::UART_RX_TRACE_SIZE];
+        U32 m_traceTotal;
     };
 
 } // end namespace Zephyr

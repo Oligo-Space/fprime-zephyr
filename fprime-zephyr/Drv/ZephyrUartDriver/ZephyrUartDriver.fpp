@@ -18,6 +18,10 @@ module Zephyr {
     @ Receive error totals since configure(), counted in the interrupt handler
     sync input port errorCounts: Zephyr.UartGetErrorCounts
 
+    @ The most recent received bytes with their receipt times and error
+    @ flags, recorded in the interrupt handler. Diagnostic.
+    sync input port rxTrace: Zephyr.UartGetRxTrace
+
     @Allocate new buffer
     output port allocate: Fw.BufferGet
 
