@@ -19,7 +19,11 @@ namespace Zephyr {
     ZephyrUartDriver ::
         ZephyrUartDriver(
             const char *const compName
-        ) : ZephyrUartDriverComponentBase(compName)
+        ) : ZephyrUartDriverComponentBase(compName),
+            m_dev(nullptr),
+            m_framingErrors(ATOMIC_INIT(0)),
+            m_noiseErrors(ATOMIC_INIT(0)),
+            m_overrunErrors(ATOMIC_INIT(0))
     {
     }
 
@@ -29,7 +33,8 @@ namespace Zephyr {
 
     }
 
-    void ZephyrUartDriver::configure(const struct device *dev, U32 baud_rate, bool flow) {
+    void ZephyrUartDriver::configure(const struct device *dev, U32 baud_rate, bool flow, U8 *ring_buf_data,
+                                     U32 ring_buf_size) {
         FW_ASSERT(dev != nullptr);
         m_dev = dev;
 
@@ -50,8 +55,13 @@ namespace Zephyr {
         }
         uart_configure(this->m_dev, &uart_cfg);
 
-        ring_buf_init(&this->m_ring_buf, RING_BUF_SIZE, this->m_ring_buf_data);
-        uart_irq_callback_user_data_set(this->m_dev, serial_cb, &this->m_ring_buf);
+        // Use the caller's ring storage when given; otherwise the member array
+        if ((ring_buf_data != nullptr) && (ring_buf_size != 0)) {
+            ring_buf_init(&this->m_ring_buf, ring_buf_size, ring_buf_data);
+        } else {
+            ring_buf_init(&this->m_ring_buf, RING_BUF_SIZE, this->m_ring_buf_data);
+        }
+        uart_irq_callback_user_data_set(this->m_dev, serial_cb, this);
 
         uart_irq_rx_enable(this->m_dev);
 	    uart_irq_tx_disable(this->m_dev);
@@ -63,10 +73,25 @@ namespace Zephyr {
 
     void ZephyrUartDriver::serial_cb(const struct device *dev, void *user_data)
     {
-        struct ring_buf *ring_buf = reinterpret_cast<struct ring_buf *>(user_data);
+        ZephyrUartDriver *self = reinterpret_cast<ZephyrUartDriver *>(user_data);
+        struct ring_buf *ring_buf = &self->m_ring_buf;
 
         if (!uart_irq_update(dev)) {
             return;
+        }
+
+        // Read and clear the receive error flags before the data: reading the data clears the overrun flag.
+        const int errors = uart_err_check(dev);
+        if (errors > 0) {
+            if ((errors & UART_ERROR_FRAMING) != 0) {
+                (void)atomic_inc(&self->m_framingErrors);
+            }
+            if ((errors & UART_ERROR_NOISE) != 0) {
+                (void)atomic_inc(&self->m_noiseErrors);
+            }
+            if ((errors & UART_ERROR_OVERRUN) != 0) {
+                (void)atomic_inc(&self->m_overrunErrors);
+            }
         }
 
         if (!uart_irq_rx_ready(dev)) {
@@ -119,6 +144,29 @@ namespace Zephyr {
 
     void ZephyrUartDriver ::recvReturnIn_handler(const FwIndexType portNum, Fw::Buffer &returnBuffer) {
         this->deallocate_out(0, returnBuffer);
+    }
+
+    bool ZephyrUartDriver ::txComplete_handler(const FwIndexType portNum) {
+        // uart_poll_out() returns once a byte is in the transmit register, before it has left the pin.
+        // The transmission-complete flag is set only when the last stop bit is out; writing a byte clears it.
+        FW_ASSERT(this->m_dev != nullptr);
+        return uart_irq_tx_complete(this->m_dev) > 0;
+    }
+
+    Fw::Success ZephyrUartDriver ::setBaudRate_handler(const FwIndexType portNum, U32 baudRate) {
+        FW_ASSERT(this->m_dev != nullptr);
+        struct uart_config config;
+        if (uart_config_get(this->m_dev, &config) != 0) {
+            return Fw::Success::FAILURE;
+        }
+        config.baudrate = baudRate;
+        return (uart_configure(this->m_dev, &config) == 0) ? Fw::Success::SUCCESS : Fw::Success::FAILURE;
+    }
+
+    Zephyr::UartErrorCounts ZephyrUartDriver ::errorCounts_handler(const FwIndexType portNum) {
+        return Zephyr::UartErrorCounts(static_cast<U32>(atomic_get(&this->m_framingErrors)),
+                                       static_cast<U32>(atomic_get(&this->m_noiseErrors)),
+                                       static_cast<U32>(atomic_get(&this->m_overrunErrors)));
     }
 
 } // end namespace Zephyr
