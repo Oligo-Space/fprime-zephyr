@@ -20,9 +20,11 @@ bool isNewer(const ZephyrRawTimeHandle& a, const ZephyrRawTimeHandle& b) {
 }
 
 ZephyrRawTime::Status ZephyrRawTime::now() {
-    U32 uptime_millsec = k_uptime_get();
-    this->m_handle.m_seconds = uptime_millsec / 1000;
-    this->m_handle.m_micros = (uptime_millsec % 1000) * 1000;
+    // Uptime in microseconds, 64 bits wide. A 32-bit millisecond value wraps after 49.7 days;
+    // the U32 seconds field below lasts 136 years. Resolution is one kernel tick.
+    const int64_t uptime_usec = k_ticks_to_us_floor64(k_uptime_ticks());
+    this->m_handle.m_seconds = static_cast<U32>(uptime_usec / 1000000);
+    this->m_handle.m_micros = static_cast<U32>(uptime_usec % 1000000);
     return Status::OP_OK;
 }
 
